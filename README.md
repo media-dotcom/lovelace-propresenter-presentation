@@ -1,7 +1,7 @@
 # ProPresenter Presentation Card
 
 `custom:propresenter-presentation` is the companion dashboard card for the
-Home Assistant [ProPresenter integration](https://github.com/BenJamesAndo/ha-propresenter).
+Home Assistant [ProPresenter integration](https://github.com/media-dotcom/ha-propresenter).
 It renders the changing slide collection as one responsive grid instead of
 creating Home Assistant entities for individual slides.
 
