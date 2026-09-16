@@ -823,9 +823,9 @@ export class ProPresenterPresentationCard extends LitElement {
             <button
               @click=${this._makeSelectedPlaylistItemLive}
               ?disabled=${Boolean(this._pendingPlaylistPresentationUuid)}
-              title="Switch ProPresenter to this playlist item"
+              title="Enter this playlist item in ProPresenter"
             >
-              ${this._pendingPlaylistPresentationUuid ? "Switching…" : "Go live"}
+              ${this._pendingPlaylistPresentationUuid ? "Entering…" : "Enter"}
             </button>
           </div>`
         : nothing}

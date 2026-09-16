@@ -23,7 +23,7 @@ dashboard to grow normally.
 The card obtains short-lived signed paths from Home Assistant for thumbnails;
 no ProPresenter or Home Assistant token belongs in the card configuration.
 Choosing a playlist item first loads its slides without changing ProPresenter's
-live output. Press **Go live** to trigger that selected item explicitly; the
+live output. Press **Enter** to trigger that selected item explicitly; the
 card sends the playlist revision and stable item key so stale selections are
 rejected. The **Live** button returns to the active presentation. Read-only mode
 removes the live-switch and slide-trigger controls.
