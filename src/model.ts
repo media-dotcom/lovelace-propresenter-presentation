@@ -10,6 +10,7 @@ const GENERIC_HASS_ERROR = "Home Assistant could not complete the request";
 export const DEFAULT_CONFIG: Required<
   Omit<CardConfig, "type" | "entity" | "columns">
 > & { columns: number | "auto" } = {
+  media_player_entity: null,
   design: "grid",
   columns: "auto",
   browser_height: 560,
@@ -37,7 +38,41 @@ export function normalizeConfig(config: CardConfig): CardConfig {
     design: config.design && config.design in { grid: true } ? config.design : "grid",
     browser_height: browserHeight,
     internal_scroll: config.internal_scroll !== false,
+    media_player_entity:
+      typeof config.media_player_entity === "string" && config.media_player_entity.trim()
+        ? config.media_player_entity.trim()
+        : null,
   };
+}
+
+export function mediaPlayerTransportState(
+  state: HassState | undefined,
+): "playing" | "paused" | null {
+  const value = state?.state?.toLowerCase();
+  return value === "playing" || value === "paused" ? value : null;
+}
+
+export function isVideoMediaPlayerActive(state: HassState | undefined): boolean {
+  if (!mediaPlayerTransportState(state)) return false;
+  const contentType = state?.attributes?.media_content_type;
+  if (typeof contentType === "string" && contentType.trim()) {
+    return contentType.toLowerCase() === "video";
+  }
+  const title = state?.attributes?.media_title;
+  return typeof title === "string" && Boolean(title.trim());
+}
+
+export function formatMediaTime(value: unknown): string | null {
+  const seconds = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  const wholeSeconds = Math.floor(seconds);
+  const hours = Math.floor(wholeSeconds / 3600);
+  const minutes = Math.floor((wholeSeconds % 3600) / 60);
+  const remainingSeconds = wholeSeconds % 60;
+  if (hours) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+  }
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
 export function flattenSlides(groups: PresentationGroup[]): PresentationSlide[] {

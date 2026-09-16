@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   flattenSlides,
   formatHassError,
+  formatMediaTime,
   guardedPlaylistTriggerData,
   guardedTriggerData,
+  isVideoMediaPlayerActive,
   metadataPointer,
+  mediaPlayerTransportState,
   normalizeConfig,
   thumbnailPath,
 } from "../src/model";
@@ -48,7 +51,24 @@ describe("presentation card model", () => {
       thumbnail_quality: 400,
       read_only: false,
       follow_live: true,
+      media_player_entity: null,
     });
+  });
+
+  it("recognizes active ProPresenter video transport states", () => {
+    expect(isVideoMediaPlayerActive({ state: "playing", attributes: { media_content_type: "video" } })).toBe(true);
+    expect(isVideoMediaPlayerActive({ state: "paused", attributes: { media_content_type: "video" } })).toBe(true);
+    expect(isVideoMediaPlayerActive({ state: "idle", attributes: { media_content_type: "video" } })).toBe(false);
+    expect(isVideoMediaPlayerActive({ state: "playing", attributes: { media_content_type: "image" } })).toBe(false);
+    expect(isVideoMediaPlayerActive({ state: "playing", attributes: { media_title: "fallback.mp4" } })).toBe(true);
+    expect(mediaPlayerTransportState({ state: "PLAYING" })).toBe("playing");
+  });
+
+  it("formats media positions for the playback header", () => {
+    expect(formatMediaTime(0)).toBe("0:00");
+    expect(formatMediaTime(65.8)).toBe("1:05");
+    expect(formatMediaTime(3661)).toBe("1:01:01");
+    expect(formatMediaTime("not a time")).toBeNull();
   });
 
   it("keeps the browser height within tablet-friendly limits", () => {

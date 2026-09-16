@@ -3,10 +3,13 @@ import { DESIGN_REGISTRY, designTokens } from "./designs";
 import {
   DEFAULT_CONFIG,
   flattenSlides,
+  formatMediaTime,
   guardedPlaylistTriggerData,
   guardedTriggerData,
   formatHassError,
+  isVideoMediaPlayerActive,
   metadataPointer,
+  mediaPlayerTransportState,
   normalizeConfig,
   thumbnailPath,
 } from "./model";
@@ -95,6 +98,59 @@ export class ProPresenterPresentationCard extends LitElement {
       display: flex;
       gap: 8px;
       margin: -4px 0 12px;
+    }
+
+    .media-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      border: 1px solid color-mix(in srgb, var(--pp-accent) 25%, transparent);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--pp-accent) 10%, var(--pp-surface));
+    }
+
+    .media-heading {
+      display: grid;
+      min-width: 0;
+      gap: 2px;
+    }
+
+    .media-kicker {
+      color: var(--pp-accent);
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .media-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.88rem;
+    }
+
+    .media-meta {
+      color: var(--pp-muted);
+      font-size: 0.75rem;
+    }
+
+    .media-actions {
+      display: flex;
+      flex: 0 0 auto;
+      gap: 6px;
+    }
+
+    .media-actions button {
+      min-width: 72px;
+    }
+
+    .media-actions button.active {
+      color: var(--text-primary-color, white);
+      background: var(--pp-accent);
     }
 
     select {
@@ -290,6 +346,8 @@ export class ProPresenterPresentationCard extends LitElement {
   private _pendingTimer?: number;
   private _pendingPlaylistPresentationUuid: string | null = null;
   private _playlistPendingTimer?: number;
+  private _mediaPendingCommand: "media_play" | "media_pause" | null = null;
+  private _mediaCommandTimer?: number;
   private _error: CardError = null;
   private _statusMessage = "";
   private _lastStatePointer = "";
@@ -297,8 +355,10 @@ export class ProPresenterPresentationCard extends LitElement {
 
   set hass(value: HomeAssistantLike) {
     const oldState = this._state();
+    const oldMediaState = this._mediaPlayerState();
     this._hass = value;
     const newState = this._state();
+    const newMediaState = this._mediaPlayerState();
     const playlistPointer = this._playlistPointer(newState);
     if (playlistPointer !== this._lastPlaylistStatePointer) {
       this._lastPlaylistStatePointer = playlistPointer;
@@ -339,7 +399,7 @@ export class ProPresenterPresentationCard extends LitElement {
         this._scrollToActive();
       }
     }
-    if (oldState !== newState) {
+    if (oldState !== newState || oldMediaState !== newMediaState) {
       this.requestUpdate();
     }
   }
@@ -366,6 +426,8 @@ export class ProPresenterPresentationCard extends LitElement {
       window.clearTimeout(this._playlistPendingTimer);
       this._playlistPendingTimer = undefined;
     }
+    this._clearMediaCommandTimer();
+    this._mediaPendingCommand = null;
     this._clearThumbnailUrls();
     this._error = null;
     this.requestUpdate();
@@ -382,6 +444,10 @@ export class ProPresenterPresentationCard extends LitElement {
           name: "entity",
           required: true,
           selector: { entity: { domain: "sensor", integration: "propresenter" } },
+        },
+        {
+          name: "media_player_entity",
+          selector: { entity: { domain: "media_player", integration: "propresenter" } },
         },
         {
           name: "design",
@@ -470,6 +536,7 @@ export class ProPresenterPresentationCard extends LitElement {
     if (this._playlistPendingTimer !== undefined) {
       window.clearTimeout(this._playlistPendingTimer);
     }
+    this._clearMediaCommandTimer();
     super.disconnectedCallback();
   }
 
@@ -517,6 +584,7 @@ export class ProPresenterPresentationCard extends LitElement {
             <button @click=${this._refresh} title="Refresh presentation metadata">↻</button>
           </div>
         </div>
+        ${this._renderMediaHeader()}
         ${!slideLayerActive ? html`<div class="banner warning">Output cleared · the active cue is still shown below</div>` : nothing}
         ${this._error ? html`<div class="banner error">${this._error.message}</div>` : nothing}
         ${this._statusMessage ? html`<div class="banner">${this._statusMessage}</div>` : nothing}
@@ -545,6 +613,47 @@ export class ProPresenterPresentationCard extends LitElement {
             `)}</div></div>`
           : html`<p class="muted">${this._metadata?.metadata_available === false || !this._metadata ? "Loading presentation slides…" : "No active presentation"}</p>`}
       </article>
+    `;
+  }
+
+  private _renderMediaHeader() {
+    const mediaState = this._mediaPlayerState();
+    if (!isVideoMediaPlayerActive(mediaState)) return nothing;
+    const transportState = mediaPlayerTransportState(mediaState);
+    const attributes = mediaState?.attributes ?? {};
+    const title = this._stringAttribute(attributes.media_title) ?? "Video";
+    const position = formatMediaTime(attributes.media_position);
+    const duration = formatMediaTime(attributes.media_duration);
+    const time = position && duration ? `${position} / ${duration}` : position ?? duration;
+    const pending = this._mediaPendingCommand;
+    const controlsEnabled = !this._config.read_only && !this._isEditorPreview();
+    const status = pending
+      ? pending === "media_play" ? "Sending play…" : "Sending pause…"
+      : transportState === "playing" ? "Playing" : "Paused";
+    return html`
+      <section class="media-header" aria-label="ProPresenter video playback">
+        <div class="media-heading">
+          <p class="media-kicker">Video playback</p>
+          <strong class="media-title">${title}</strong>
+          <p class="media-meta">${status}${time ? ` · ${time}` : ""}</p>
+        </div>
+        ${controlsEnabled
+          ? html`<div class="media-actions">
+              <button
+                class=${transportState === "playing" ? "active" : ""}
+                @click=${() => this._mediaPlayerCommand("media_play")}
+                ?disabled=${Boolean(pending) || transportState === "playing"}
+                title="Play the ProPresenter video"
+              >▶ Play</button>
+              <button
+                class=${transportState === "paused" ? "active" : ""}
+                @click=${() => this._mediaPlayerCommand("media_pause")}
+                ?disabled=${Boolean(pending) || transportState !== "playing"}
+                title="Pause the ProPresenter video"
+              >⏸ Pause</button>
+            </div>`
+          : nothing}
+      </section>
     `;
   }
 
@@ -771,6 +880,46 @@ export class ProPresenterPresentationCard extends LitElement {
   private _refresh = (): void => {
     void Promise.all([this._loadPlaylists(true), this._loadMetadata(true)]);
   };
+
+  private async _mediaPlayerCommand(
+    service: "media_play" | "media_pause",
+  ): Promise<void> {
+    const entityId = this._config.media_player_entity;
+    if (
+      !entityId ||
+      this._config.read_only ||
+      this._isEditorPreview() ||
+      !this._hass ||
+      !isVideoMediaPlayerActive(this._mediaPlayerState())
+    ) {
+      return;
+    }
+    this._clearMediaCommandTimer();
+    this._mediaPendingCommand = service;
+    this._error = null;
+    this._statusMessage = service === "media_play"
+      ? "Video play command pending"
+      : "Video pause command pending";
+    this.requestUpdate();
+    try {
+      await this._hass.callService("media_player", service, { entity_id: entityId });
+      const message = service === "media_play" ? "Video play command sent" : "Video pause command sent";
+      this._statusMessage = message;
+      this._mediaCommandTimer = window.setTimeout(() => {
+        if (this._statusMessage === message) {
+          this._statusMessage = "";
+          this.requestUpdate();
+        }
+        this._mediaCommandTimer = undefined;
+      }, 2500);
+    } catch (error) {
+      this._statusMessage = "";
+      this._error = { message: `Video command failed: ${this._errorMessage(error)}` };
+    } finally {
+      this._mediaPendingCommand = null;
+      this.requestUpdate();
+    }
+  }
 
   private _renderPlaylistPicker() {
     if (!this._playlists.length) return nothing;
@@ -1081,6 +1230,18 @@ export class ProPresenterPresentationCard extends LitElement {
     this._thumbnailUrls.clear();
     this._thumbnailStates.clear();
     this._thumbnailQueue = [];
+  }
+
+  private _clearMediaCommandTimer(): void {
+    if (this._mediaCommandTimer !== undefined) {
+      window.clearTimeout(this._mediaCommandTimer);
+      this._mediaCommandTimer = undefined;
+    }
+  }
+
+  private _mediaPlayerState(): HassState | undefined {
+    const entityId = this._config.media_player_entity;
+    return entityId ? this._hass?.states?.[entityId] : undefined;
   }
 
   private _state(): HassState | undefined {

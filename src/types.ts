@@ -3,6 +3,7 @@ export type DesignName = "grid";
 export interface CardConfig {
   type?: string;
   entity: string;
+  media_player_entity?: string | null;
   design?: DesignName;
   columns?: number | "auto";
   browser_height?: number;
