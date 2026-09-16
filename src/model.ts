@@ -10,6 +10,8 @@ export const DEFAULT_CONFIG: Required<
 > & { columns: number | "auto" } = {
   design: "grid",
   columns: "auto",
+  browser_height: 560,
+  internal_scroll: true,
   thumbnail_quality: 400,
   show_group_labels: true,
   show_slide_labels: true,
@@ -24,10 +26,15 @@ export function normalizeConfig(config: CardConfig): CardConfig {
   if (!config || typeof config.entity !== "string" || !config.entity) {
     throw new Error("You must select a ProPresenter active-presentation sensor");
   }
+  const browserHeight = typeof config.browser_height === "number" && Number.isFinite(config.browser_height)
+    ? Math.min(1200, Math.max(240, Math.round(config.browser_height)))
+    : DEFAULT_CONFIG.browser_height;
   return {
     ...DEFAULT_CONFIG,
     ...config,
     design: config.design && config.design in { grid: true } ? config.design : "grid",
+    browser_height: browserHeight,
+    internal_scroll: config.internal_scroll !== false,
   };
 }
 

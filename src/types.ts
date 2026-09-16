@@ -5,6 +5,8 @@ export interface CardConfig {
   entity: string;
   design?: DesignName;
   columns?: number | "auto";
+  browser_height?: number;
+  internal_scroll?: boolean;
   thumbnail_quality?: 200 | 400 | 800;
   show_group_labels?: boolean;
   show_slide_labels?: boolean;

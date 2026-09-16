@@ -15,7 +15,10 @@ if HACS does not add it automatically.
 The integration must be installed at version `0.5.0` or later. Choose the
 `Active presentation` sensor in the visual editor and configure the grid,
 thumbnail quality, labels, notes, read-only mode, confirmation, and live
-following behavior there.
+following behavior there. The slide browser scrolls inside the card by
+default, so other cards on a tablet dashboard remain in place. Adjust
+`browser_height` in pixels or set `internal_scroll: false` if you prefer the
+dashboard to grow normally.
 
 The card obtains short-lived signed paths from Home Assistant for thumbnails;
 no ProPresenter or Home Assistant token belongs in the card configuration.

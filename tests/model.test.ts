@@ -41,9 +41,23 @@ describe("presentation card model", () => {
     expect(normalizeConfig({ entity: "sensor.pp" })).toMatchObject({
       entity: "sensor.pp",
       design: "grid",
+      browser_height: 560,
+      internal_scroll: true,
       thumbnail_quality: 400,
       read_only: false,
       follow_live: true,
+    });
+  });
+
+  it("keeps the browser height within tablet-friendly limits", () => {
+    expect(normalizeConfig({ entity: "sensor.pp", browser_height: 100 })).toMatchObject({
+      browser_height: 240,
+    });
+    expect(normalizeConfig({ entity: "sensor.pp", browser_height: 1400 })).toMatchObject({
+      browser_height: 1200,
+    });
+    expect(normalizeConfig({ entity: "sensor.pp", browser_height: Number.NaN })).toMatchObject({
+      browser_height: 560,
     });
   });
 

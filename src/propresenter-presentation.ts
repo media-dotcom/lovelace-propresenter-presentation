@@ -119,6 +119,22 @@ export class ProPresenterPresentationCard extends LitElement {
       gap: 14px;
     }
 
+    .slide-browser {
+      max-height: var(--pp-browser-height);
+      overflow-x: hidden;
+      overflow-y: auto;
+      padding-right: 4px;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .slide-browser.no-scroll {
+      max-height: none;
+      overflow: visible;
+      padding-right: 0;
+    }
+
     .group-title {
       margin: 0 0 7px;
       color: var(--pp-muted);
@@ -306,6 +322,18 @@ export class ProPresenterPresentationCard extends LitElement {
           },
         },
         {
+          name: "browser_height",
+          selector: {
+            number: {
+              min: 240,
+              max: 1200,
+              step: 20,
+              mode: "box",
+            },
+          },
+        },
+        { name: "internal_scroll", selector: { boolean: {} } },
+        {
           name: "thumbnail_quality",
           selector: {
             select: {
@@ -382,7 +410,8 @@ export class ProPresenterPresentationCard extends LitElement {
     const columns = this._config.columns === "auto" || this._config.columns === undefined
       ? "auto-fit"
       : String(this._config.columns);
-    const tokens = `${designTokens(this._config.design)} --pp-columns: ${columns};`;
+    const browserHeight = this._config.browser_height ?? DEFAULT_CONFIG.browser_height;
+    const tokens = `${designTokens(this._config.design)} --pp-columns: ${columns}; --pp-browser-height: ${browserHeight}px;`;
 
     return html`
       <article class="card" style=${tokens}>
@@ -405,14 +434,18 @@ export class ProPresenterPresentationCard extends LitElement {
           ? html`<div class="banner error">This card needs a newer integration protocol.</div>`
           : nothing}
         ${groups.length
-          ? html`<div class="groups">${groups.map((group) => html`
+          ? html`<div
+              class=${this._config.internal_scroll === false ? "slide-browser no-scroll" : "slide-browser"}
+              role="region"
+              aria-label="Presentation slides"
+            ><div class="groups">${groups.map((group) => html`
               <section>
                 ${this._config.show_group_labels ? html`<h3 class="group-title">${group.label}</h3>` : nothing}
                 <div class="grid">
                   ${group.slides.map((slide) => this._renderSlide(slide))}
                 </div>
               </section>
-            `)}</div>`
+            `)}</div></div>`
           : html`<p class="muted">${this._metadata?.metadata_available === false || !this._metadata ? "Loading presentation slides…" : "No active presentation"}</p>`}
       </article>
     `;
@@ -645,10 +678,28 @@ export class ProPresenterPresentationCard extends LitElement {
     const index = this._currentIndex(this._state());
     if (index === null) return;
     queueMicrotask(() => {
-      this.renderRoot.querySelector<HTMLElement>(`#${this._slideId(index)}`)?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
+      const target = this.renderRoot.querySelector<HTMLElement>(`#${this._slideId(index)}`);
+      if (!target) return;
+      const browser = this.renderRoot.querySelector<HTMLElement>(".slide-browser");
+      if (!browser || this._config.internal_scroll === false) {
+        target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        return;
+      }
+      const browserRect = browser.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const targetTop = targetRect.top - browserRect.top + browser.scrollTop;
+      const targetBottom = targetTop + targetRect.height;
+      const visibleTop = browser.scrollTop;
+      const visibleBottom = visibleTop + browser.clientHeight;
+      const margin = 12;
+      if (targetTop < visibleTop) {
+        browser.scrollTo({ top: Math.max(0, targetTop - margin), behavior: "smooth" });
+      } else if (targetBottom > visibleBottom) {
+        browser.scrollTo({
+          top: Math.min(browser.scrollHeight - browser.clientHeight, targetBottom - browser.clientHeight + margin),
+          behavior: "smooth",
+        });
+      }
     });
   }
 
@@ -735,6 +786,6 @@ if (!customCards.some((item) => item.type === "propresenter-presentation")) {
     name: "ProPresenter Presentation",
     description: "A dynamic, guarded ProPresenter slide browser",
     preview: true,
-    documentationURL: "https://github.com/BenJamesAndo/lovelace-propresenter-presentation",
+    documentationURL: "https://github.com/media-dotcom/lovelace-propresenter-presentation",
   });
 }
