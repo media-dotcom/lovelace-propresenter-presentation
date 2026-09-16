@@ -82,6 +82,36 @@ export function guardedTriggerData(
   };
 }
 
+export function guardedPlaylistTriggerData(
+  entityId: string,
+  playlistUuid: string | null,
+  itemKey: string | null,
+  itemIndex: number | null,
+  presentationUuid: string | null,
+  playlistRevision: string | null,
+): Record<string, unknown> {
+  if (
+    !playlistUuid ||
+    !itemKey ||
+    itemIndex === null ||
+    itemIndex < 0 ||
+    !presentationUuid ||
+    !playlistRevision
+  ) {
+    throw new Error(
+      "A current playlist UUID, item key, item index, presentation UUID, and playlist revision are required",
+    );
+  }
+  return {
+    entity_id: entityId,
+    playlist_uuid: playlistUuid,
+    item_key: itemKey,
+    item_index: itemIndex,
+    presentation_uuid: presentationUuid,
+    expected_playlist_revision: playlistRevision,
+  };
+}
+
 export function formatHassError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "string" && error.trim()) return error;

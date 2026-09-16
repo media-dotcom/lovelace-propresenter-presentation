@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   flattenSlides,
   formatHassError,
+  guardedPlaylistTriggerData,
   guardedTriggerData,
   metadataPointer,
   normalizeConfig,
@@ -70,6 +71,29 @@ describe("presentation card model", () => {
       expected_metadata_revision: "revision",
     });
     expect(() => guardedTriggerData("sensor.pp", 5, "uuid", null)).toThrow();
+  });
+
+  it("includes playlist identity and revision guards in a live switch payload", () => {
+    expect(
+      guardedPlaylistTriggerData(
+        "sensor.pp",
+        "playlist",
+        "playlist:2:pres",
+        2,
+        "pres",
+        "playlist-revision",
+      ),
+    ).toEqual({
+      entity_id: "sensor.pp",
+      playlist_uuid: "playlist",
+      item_key: "playlist:2:pres",
+      item_index: 2,
+      presentation_uuid: "pres",
+      expected_playlist_revision: "playlist-revision",
+    });
+    expect(
+      () => guardedPlaylistTriggerData("sensor.pp", "playlist", "item", 0, "pres", null),
+    ).toThrow();
   });
 
   it("preserves structured Home Assistant WebSocket errors", () => {

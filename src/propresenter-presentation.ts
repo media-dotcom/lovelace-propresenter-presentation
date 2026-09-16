@@ -3,6 +3,7 @@ import { DESIGN_REGISTRY, designTokens } from "./designs";
 import {
   DEFAULT_CONFIG,
   flattenSlides,
+  guardedPlaylistTriggerData,
   guardedTriggerData,
   formatHassError,
   metadataPointer,
@@ -88,6 +89,12 @@ export class ProPresenterPresentationCard extends LitElement {
       grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
       gap: 8px;
       margin-bottom: 12px;
+    }
+
+    .playlist-actions {
+      display: flex;
+      gap: 8px;
+      margin: -4px 0 12px;
     }
 
     select {
@@ -267,6 +274,7 @@ export class ProPresenterPresentationCard extends LitElement {
   private _playlistPromise: Promise<void> | null = null;
   private _playlistRequestKey = "__initial__";
   private _playlistRequestSequence = 0;
+  private _playlistRevision: string | null = null;
   private _lastPlaylistStatePointer = "__initial__";
   private _selectedPlaylistUuid: string | null = null;
   private _selectedItemKey: string | null = null;
@@ -280,6 +288,8 @@ export class ProPresenterPresentationCard extends LitElement {
   private _followingLive = true;
   private _pendingIndex: number | null = null;
   private _pendingTimer?: number;
+  private _pendingPlaylistPresentationUuid: string | null = null;
+  private _playlistPendingTimer?: number;
   private _error: CardError = null;
   private _statusMessage = "";
   private _lastStatePointer = "";
@@ -311,6 +321,15 @@ export class ProPresenterPresentationCard extends LitElement {
       }
     }
     const currentIndex = this._currentIndex(newState);
+    const currentPresentationUuid = this._stringAttribute(
+      newState?.attributes?.presentation_uuid,
+    );
+    if (
+      this._pendingPlaylistPresentationUuid &&
+      currentPresentationUuid === this._pendingPlaylistPresentationUuid
+    ) {
+      this._confirmPlaylistSwitch();
+    }
     if (currentIndex !== this._lastCurrentIndex) {
       this._lastCurrentIndex = currentIndex;
       if (this._pendingIndex === currentIndex) {
@@ -336,11 +355,17 @@ export class ProPresenterPresentationCard extends LitElement {
     this._playlistRequestSequence += 1;
     this._metadataRequestKey = "";
     this._playlistRequestKey = "__initial__";
+    this._playlistRevision = null;
     this._lastPlaylistStatePointer = "__initial__";
     this._playlists = [];
     this._selectedPlaylistUuid = null;
     this._selectedItemKey = null;
     this._selectedPresentationUuid = null;
+    this._pendingPlaylistPresentationUuid = null;
+    if (this._playlistPendingTimer !== undefined) {
+      window.clearTimeout(this._playlistPendingTimer);
+      this._playlistPendingTimer = undefined;
+    }
     this._clearThumbnailUrls();
     this._error = null;
     this.requestUpdate();
@@ -441,6 +466,9 @@ export class ProPresenterPresentationCard extends LitElement {
     this._clearThumbnailUrls();
     if (this._pendingTimer !== undefined) {
       window.clearTimeout(this._pendingTimer);
+    }
+    if (this._playlistPendingTimer !== undefined) {
+      window.clearTimeout(this._playlistPendingTimer);
     }
     super.disconnectedCallback();
   }
@@ -750,8 +778,17 @@ export class ProPresenterPresentationCard extends LitElement {
       (playlist) => playlist.uuid === this._selectedPlaylistUuid,
     );
     const items = selectedPlaylist?.items ?? [];
+    const selectedItem = items.find(
+      (item) => item.key === this._selectedItemKey,
+    );
     const liveUuid = this._stringAttribute(
       this._state()?.attributes?.presentation_uuid,
+    );
+    const canSwitchLive = Boolean(
+      selectedItem &&
+        selectedItem.presentation_uuid !== liveUuid &&
+        !this._config.read_only &&
+        !this._isEditorPreview(),
     );
     return html`
       <div class="playlist-picker">
@@ -781,7 +818,101 @@ export class ProPresenterPresentationCard extends LitElement {
           )}
         </select>
       </div>
+      ${canSwitchLive
+        ? html`<div class="playlist-actions">
+            <button
+              @click=${this._makeSelectedPlaylistItemLive}
+              ?disabled=${Boolean(this._pendingPlaylistPresentationUuid)}
+              title="Switch ProPresenter to this playlist item"
+            >
+              ${this._pendingPlaylistPresentationUuid ? "Switching…" : "Go live"}
+            </button>
+          </div>`
+        : nothing}
     `;
+  }
+
+  private async _makeSelectedPlaylistItemLive(): Promise<void> {
+    if (
+      this._config.read_only ||
+      this._isEditorPreview() ||
+      !this._hass ||
+      !this._selectedPlaylistUuid ||
+      !this._selectedItemKey
+    ) {
+      return;
+    }
+    const playlist = this._playlists.find(
+      (candidate) => candidate.uuid === this._selectedPlaylistUuid,
+    );
+    const item = playlist?.items.find(
+      (candidate) => candidate.key === this._selectedItemKey,
+    );
+    if (!item) return;
+    const liveUuid = this._stringAttribute(
+      this._state()?.attributes?.presentation_uuid,
+    );
+    if (item.presentation_uuid === liveUuid) return;
+    if (!this._playlistRevision) {
+      this._error = { message: "Refresh the playlist before switching live items" };
+      this.requestUpdate();
+      return;
+    }
+    if (
+      this._config.confirm_trigger &&
+      !window.confirm(`Make “${item.name}” live in ProPresenter?`)
+    ) {
+      return;
+    }
+
+    const targetUuid = item.presentation_uuid;
+    this._pendingPlaylistPresentationUuid = targetUuid;
+    this._statusMessage = "Playlist switch pending · waiting for live confirmation";
+    this._error = null;
+    this.requestUpdate();
+    try {
+      await this._hass.callService(
+        "propresenter",
+        "trigger_playlist_item",
+        guardedPlaylistTriggerData(
+          this._config.entity,
+          this._selectedPlaylistUuid,
+          item.key,
+          item.index,
+          targetUuid,
+          this._playlistRevision,
+        ),
+      );
+      if (this._pendingPlaylistPresentationUuid !== targetUuid) return;
+      this._returnToLive();
+      this._statusMessage = "Playlist switch sent · waiting for live confirmation";
+      this._playlistPendingTimer = window.setTimeout(() => {
+        if (this._pendingPlaylistPresentationUuid === targetUuid) {
+          this._pendingPlaylistPresentationUuid = null;
+          this._playlistPendingTimer = undefined;
+          this._statusMessage = "Playlist switch sent, but live confirmation is unavailable";
+          this.requestUpdate();
+        }
+      }, 5000);
+      this.requestUpdate();
+    } catch (error) {
+      this._pendingPlaylistPresentationUuid = null;
+      if (this._playlistPendingTimer !== undefined) {
+        window.clearTimeout(this._playlistPendingTimer);
+        this._playlistPendingTimer = undefined;
+      }
+      this._statusMessage = "";
+      const message = this._errorMessage(error);
+      const stale = /stale|changed|revision|playlist|item/i.test(message);
+      this._error = {
+        message: stale
+          ? "The playlist changed; refreshing playlist items"
+          : `Playlist switch failed: ${message}`,
+        stale,
+      };
+      this.requestUpdate();
+      if (stale) await this._loadPlaylists(true);
+    }
   }
 
   private _handlePlaylistChange = (event: Event): void => {
@@ -859,6 +990,7 @@ export class ProPresenterPresentationCard extends LitElement {
                 Boolean(playlist?.uuid) && Array.isArray(playlist.items),
             )
           : [];
+        this._playlistRevision = result.playlist_revision;
         this._playlistRequestKey = result.playlist_revision ?? pointer;
         if (
           this._selectedPresentationUuid &&
@@ -875,6 +1007,7 @@ export class ProPresenterPresentationCard extends LitElement {
         if (sequence !== this._playlistRequestSequence) return;
         this._error = { message: this._errorMessage(error) };
         this._playlistRequestKey = "";
+        this._playlistRevision = null;
         this.requestUpdate();
       }
     })();
@@ -926,6 +1059,18 @@ export class ProPresenterPresentationCard extends LitElement {
     this._statusMessage = message;
     if (this._pendingTimer !== undefined) window.clearTimeout(this._pendingTimer);
     this._pendingTimer = undefined;
+    this.requestUpdate();
+  }
+
+  private _confirmPlaylistSwitch(): void {
+    if (!this._pendingPlaylistPresentationUuid) return;
+    this._pendingPlaylistPresentationUuid = null;
+    if (this._playlistPendingTimer !== undefined) {
+      window.clearTimeout(this._playlistPendingTimer);
+      this._playlistPendingTimer = undefined;
+    }
+    this._returnToLive();
+    this._statusMessage = "Live playlist item confirmed";
     this.requestUpdate();
   }
 
