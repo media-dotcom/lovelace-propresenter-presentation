@@ -46,6 +46,33 @@ export interface PresentationResponse {
   slide_layer_active: boolean;
   metadata_available: boolean;
   groups: PresentationGroup[];
+  is_active_presentation?: boolean;
+  active_presentation_uuid?: string | null;
+  active_slide_index?: number | null;
+  active_metadata_revision?: string | null;
+}
+
+export interface PlaylistItem {
+  key: string;
+  uuid: string;
+  presentation_uuid: string;
+  name: string;
+  index: number;
+  path: string | null;
+  type: string;
+}
+
+export interface PresentationPlaylist {
+  uuid: string;
+  name: string;
+  items: PlaylistItem[];
+}
+
+export interface PlaylistResponse {
+  protocol_version: number;
+  entity_id: string;
+  playlist_revision: string | null;
+  playlists: PresentationPlaylist[];
 }
 
 export interface HassState {

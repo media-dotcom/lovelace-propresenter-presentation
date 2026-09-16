@@ -13,6 +13,8 @@ import type {
   HassState,
   HomeAssistantLike,
   PresentationResponse,
+  PlaylistResponse,
+  PresentationPlaylist,
   PresentationSlide,
   ThumbnailState,
 } from "./types";
@@ -78,6 +80,31 @@ export class ProPresenterPresentationCard extends LitElement {
       display: flex;
       flex: 0 0 auto;
       gap: 6px;
+    }
+
+    .playlist-picker {
+      display: grid;
+      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    select {
+      min-width: 0;
+      border: 1px solid color-mix(in srgb, var(--primary-text-color) 18%, transparent);
+      border-radius: 10px;
+      color: var(--primary-text-color);
+      background: var(--secondary-background-color, rgba(127, 127, 127, 0.14));
+      font: inherit;
+      padding: 8px 10px;
+    }
+
+    .browse-note {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 0 0 10px;
     }
 
     button {
@@ -219,6 +246,10 @@ export class ProPresenterPresentationCard extends LitElement {
     }
 
     @media (max-width: 520px) {
+      .playlist-picker {
+        grid-template-columns: 1fr;
+      }
+
       .grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
@@ -231,6 +262,13 @@ export class ProPresenterPresentationCard extends LitElement {
   private _metadataPromise: Promise<void> | null = null;
   private _metadataRequestKey = "";
   private _metadataRequestSequence = 0;
+  private _playlists: PresentationPlaylist[] = [];
+  private _playlistPromise: Promise<void> | null = null;
+  private _playlistRequestKey = "__initial__";
+  private _playlistRequestSequence = 0;
+  private _selectedPlaylistUuid: string | null = null;
+  private _selectedItemKey: string | null = null;
+  private _selectedPresentationUuid: string | null = null;
   private _thumbnailUrls = new Map<number, string>();
   private _thumbnailStates = new Map<number, ThumbnailState>();
   private _thumbnailQueue: number[] = [];
@@ -249,12 +287,23 @@ export class ProPresenterPresentationCard extends LitElement {
     const oldState = this._state();
     this._hass = value;
     const newState = this._state();
+    const playlistPointer = this._playlistPointer(newState);
+    if (
+      playlistPointer !== this._playlistRequestKey &&
+      !this._playlistPromise
+    ) {
+      void this._loadPlaylists(false);
+    }
     const pointer = metadataPointer(newState);
     if (pointer !== this._lastStatePointer) {
       this._lastStatePointer = pointer;
-      this._metadata = null;
-      this._clearThumbnailUrls();
-      void this._loadMetadata(false);
+      if (!this._selectedPresentationUuid) {
+        this._metadata = null;
+        this._clearThumbnailUrls();
+        void this._loadMetadata(false);
+      } else {
+        this.requestUpdate();
+      }
     }
     const currentIndex = this._currentIndex(newState);
     if (currentIndex !== this._lastCurrentIndex) {
@@ -278,7 +327,14 @@ export class ProPresenterPresentationCard extends LitElement {
   setConfig(config: CardConfig): void {
     this._config = normalizeConfig(config);
     this._followingLive = this._config.follow_live ?? true;
+    this._metadataRequestSequence += 1;
+    this._playlistRequestSequence += 1;
     this._metadataRequestKey = "";
+    this._playlistRequestKey = "__initial__";
+    this._playlists = [];
+    this._selectedPlaylistUuid = null;
+    this._selectedItemKey = null;
+    this._selectedPresentationUuid = null;
     this._clearThumbnailUrls();
     this._error = null;
     this.requestUpdate();
@@ -400,12 +456,12 @@ export class ProPresenterPresentationCard extends LitElement {
     const slideLayerActive = typeof attributes.slide_layer_active === "boolean"
       ? attributes.slide_layer_active
       : this._metadata?.slide_layer_active ?? true;
-    const presentationName = state?.state && !["unknown", "unavailable"].includes(state.state)
-      ? state.state
-      : this._metadata?.presentation_name ??
-        this._stringAttribute(attributes.presentation_name) ??
-        this._stringAttribute(attributes.friendly_name) ??
-        "ProPresenter";
+    const presentationName = this._metadata?.presentation_name ??
+      (state?.state && !["unknown", "unavailable"].includes(state.state)
+        ? state.state
+        : this._stringAttribute(attributes.presentation_name) ??
+          this._stringAttribute(attributes.friendly_name) ??
+          "ProPresenter");
     const groups = this._metadata?.groups ?? [];
     const columns = this._config.columns === "auto" || this._config.columns === undefined
       ? "auto-fit"
@@ -430,6 +486,13 @@ export class ProPresenterPresentationCard extends LitElement {
         ${!slideLayerActive ? html`<div class="banner warning">Output cleared · the active cue is still shown below</div>` : nothing}
         ${this._error ? html`<div class="banner error">${this._error.message}</div>` : nothing}
         ${this._statusMessage ? html`<div class="banner">${this._statusMessage}</div>` : nothing}
+        ${this._renderPlaylistPicker()}
+        ${this._selectedPresentationUuid
+          ? html`<div class="banner browse-note">
+              <span>Browsing playlist item · live output is unchanged</span>
+              <button @click=${this._returnToLive}>Live</button>
+            </div>`
+          : nothing}
         ${this._metadata?.protocol_version !== undefined && this._metadata.protocol_version !== 1
           ? html`<div class="banner error">This card needs a newer integration protocol.</div>`
           : nothing}
@@ -452,9 +515,9 @@ export class ProPresenterPresentationCard extends LitElement {
   }
 
   private _renderSlide(slide: PresentationSlide) {
-    const active = this._currentIndex(this._state()) === slide.index;
+    const active = !this._selectedPresentationUuid && this._currentIndex(this._state()) === slide.index;
     const disabled = slide.enabled === false;
-    const triggerable = !this._config.read_only && !disabled && !this._isEditorPreview();
+    const triggerable = !this._selectedPresentationUuid && !this._config.read_only && !disabled && !this._isEditorPreview();
     const classes = `tile ${active ? "active" : ""} ${disabled ? "disabled" : ""}`;
     const content = html`
       <div class="thumbnail" data-slide-index=${slide.index}>
@@ -476,19 +539,26 @@ export class ProPresenterPresentationCard extends LitElement {
 
   private async _loadMetadata(refresh: boolean): Promise<void> {
     if (!this._hass || !this._config.entity) return;
-    if (this._metadataPromise) return this._metadataPromise;
     const state = this._state();
-    const pointer = metadataPointer(state);
+    const requestedUuid = this._selectedPresentationUuid;
+    const pointer = requestedUuid ? `selected|${requestedUuid}` : metadataPointer(state);
+    if (pointer === this._metadataRequestKey && this._metadataPromise) {
+      return this._metadataPromise;
+    }
     if (!refresh && pointer === this._metadataRequestKey) return;
     this._metadataRequestKey = pointer;
     const sequence = ++this._metadataRequestSequence;
     const promise = (async () => {
       try {
-        const result = await this._hass!.callWS<PresentationResponse>({
-          type: "propresenter/get_active_presentation",
+        const request: Record<string, unknown> = {
+          type: requestedUuid
+            ? "propresenter/get_presentation"
+            : "propresenter/get_active_presentation",
           entity_id: this._config.entity,
           refresh,
-        });
+        };
+        if (requestedUuid) request.presentation_uuid = requestedUuid;
+        const result = await this._hass!.callWS<PresentationResponse>(request);
         if (sequence !== this._metadataRequestSequence) return;
         if (result.protocol_version !== 1) {
           this._error = { message: "The integration and card protocol versions do not match" };
@@ -665,8 +735,134 @@ export class ProPresenterPresentationCard extends LitElement {
   }
 
   private _refresh = (): void => {
-    void this._loadMetadata(true);
+    void Promise.all([this._loadPlaylists(true), this._loadMetadata(true)]);
   };
+
+  private _renderPlaylistPicker() {
+    if (!this._playlists.length) return nothing;
+    const selectedPlaylist = this._playlists.find(
+      (playlist) => playlist.uuid === this._selectedPlaylistUuid,
+    );
+    const items = selectedPlaylist?.items ?? [];
+    const liveUuid = this._stringAttribute(
+      this._state()?.attributes?.presentation_uuid,
+    );
+    return html`
+      <div class="playlist-picker">
+        <select
+          aria-label="ProPresenter playlist"
+          .value=${this._selectedPlaylistUuid ?? ""}
+          @change=${this._handlePlaylistChange}
+        >
+          <option value="">Choose playlist…</option>
+          ${this._playlists.map(
+            (playlist) => html`<option value=${playlist.uuid}>${playlist.name}</option>`,
+          )}
+        </select>
+        <select
+          aria-label="ProPresenter playlist item"
+          .value=${this._selectedItemKey ?? ""}
+          ?disabled=${!selectedPlaylist}
+          @change=${this._handleItemChange}
+        >
+          <option value="">Choose presentation…</option>
+          ${items.map(
+            (item) => html`<option value=${item.key}>
+              ${item.path ? `${item.path} · ` : ""}${item.name}${
+                item.presentation_uuid === liveUuid ? " · LIVE" : ""
+              }
+            </option>`,
+          )}
+        </select>
+      </div>
+    `;
+  }
+
+  private _handlePlaylistChange = (event: Event): void => {
+    const value = (event.target as HTMLSelectElement).value;
+    this._selectedPlaylistUuid = value || null;
+    this._selectedItemKey = null;
+    this.requestUpdate();
+  };
+
+  private _handleItemChange = (event: Event): void => {
+    const key = (event.target as HTMLSelectElement).value;
+    const playlist = this._playlists.find(
+      (candidate) => candidate.uuid === this._selectedPlaylistUuid,
+    );
+    const item = playlist?.items.find((candidate) => candidate.key === key);
+    if (!item) return;
+    this._selectedItemKey = item.key;
+    this._selectedPresentationUuid = item.presentation_uuid;
+    this._followingLive = false;
+    this._metadataRequestSequence += 1;
+    this._metadata = null;
+    this._metadataRequestKey = "";
+    this._clearThumbnailUrls();
+    this._error = null;
+    this._statusMessage = "";
+    void this._loadMetadata(false);
+    this.requestUpdate();
+  };
+
+  private _returnToLive = (): void => {
+    this._selectedPlaylistUuid = null;
+    this._selectedItemKey = null;
+    this._selectedPresentationUuid = null;
+    this._followingLive = true;
+    this._metadataRequestSequence += 1;
+    this._metadata = null;
+    this._metadataRequestKey = "";
+    this._clearThumbnailUrls();
+    void this._loadMetadata(false);
+    this.requestUpdate();
+  };
+
+  private async _loadPlaylists(refresh: boolean): Promise<void> {
+    if (!this._hass || !this._config.entity) return;
+    if (this._playlistPromise) return this._playlistPromise;
+    const pointer = this._playlistPointer(this._state());
+    if (!refresh && this._playlists.length && pointer === this._playlistRequestKey) return;
+    const sequence = ++this._playlistRequestSequence;
+    const promise = (async () => {
+      try {
+        const result = await this._hass!.callWS<PlaylistResponse>({
+          type: "propresenter/get_presentation_playlists",
+          entity_id: this._config.entity,
+          refresh,
+        });
+        if (sequence !== this._playlistRequestSequence) return;
+        if (result.protocol_version !== 1) {
+          this._error = { message: "The integration and card protocol versions do not match" };
+          return;
+        }
+        this._playlists = Array.isArray(result.playlists) ? result.playlists : [];
+        this._playlistRequestKey = result.playlist_revision ?? pointer;
+        if (
+          this._selectedPresentationUuid &&
+          !this._playlists.some((playlist) =>
+            playlist.items.some(
+              (item) => item.presentation_uuid === this._selectedPresentationUuid,
+            ),
+          )
+        ) {
+          this._returnToLive();
+        }
+        this.requestUpdate();
+      } catch (error) {
+        if (sequence !== this._playlistRequestSequence) return;
+        this._error = { message: this._errorMessage(error) };
+        this._playlistRequestKey = "";
+        this.requestUpdate();
+      }
+    })();
+    this._playlistPromise = promise;
+    try {
+      await promise;
+    } finally {
+      if (this._playlistPromise === promise) this._playlistPromise = null;
+    }
+  }
 
   private _toggleFollow = (): void => {
     this._followingLive = !this._followingLive;
@@ -734,6 +930,15 @@ export class ProPresenterPresentationCard extends LitElement {
   }
 
   private _subtitle(attributes: Record<string, unknown>): string {
+    if (this._selectedPresentationUuid) {
+      const liveName = this._stringAttribute(this._state()?.state);
+      const slideCount = this._metadata?.slide_count;
+      return [
+        "Browsing playlist item",
+        slideCount ? `${slideCount} slides` : "",
+        liveName ? `Live: ${liveName}` : "",
+      ].filter(Boolean).join(" · ");
+    }
     const index = this._currentIndex(this._state());
     const count = typeof this._metadata?.slide_count === "number"
       ? this._metadata.slide_count
@@ -746,6 +951,10 @@ export class ProPresenterPresentationCard extends LitElement {
   private _thumbnailPlaceholder(index: number): string {
     const state = this._thumbnailStates.get(index);
     return state === "error" ? "Thumbnail unavailable" : "Loading thumbnail…";
+  }
+
+  private _playlistPointer(state: HassState | undefined): string {
+    return this._stringAttribute(state?.attributes?.playlist_revision) ?? "";
   }
 
   private _slideId(index: number): string {

@@ -12,7 +12,7 @@ asset `dist/propresenter-presentation.js` as a Dashboard plugin. Add the card
 resource at `/hacsfiles/lovelace-propresenter-presentation/propresenter-presentation.js`
 if HACS does not add it automatically.
 
-The integration must be installed at version `0.5.0` or later. Choose the
+The integration must be installed at version `0.6.0` or later. Choose the
 `Active presentation` sensor in the visual editor and configure the grid,
 thumbnail quality, labels, notes, read-only mode, confirmation, and live
 following behavior there. The slide browser scrolls inside the card by
@@ -22,6 +22,9 @@ dashboard to grow normally.
 
 The card obtains short-lived signed paths from Home Assistant for thumbnails;
 no ProPresenter or Home Assistant token belongs in the card configuration.
+The playlist and presentation selectors are read-only browse controls: choosing
+a playlist item loads its slides without changing ProPresenter's live output.
+Use the Live button to return to the active presentation.
 
 ## Development
 
