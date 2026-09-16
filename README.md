@@ -15,9 +15,10 @@ if HACS does not add it automatically.
 The integration must be installed at version `0.7.0` or later. Choose the
 `Active presentation` sensor and the ProPresenter `Media Player` entity in the
 visual editor. When a video is playing or paused, the card shows a compact
-playback header with standard Home Assistant Play and Pause controls. Configure
-the grid, thumbnail quality, labels, notes, read-only mode, confirmation, and
-live following behavior there. The slide browser scrolls inside the card by
+playback header with a Spotify-style icon toggle and a seek scrubber. These use
+the media player entity's standard Home Assistant play, pause, and seek
+services. Configure the grid, thumbnail quality, labels, notes, read-only mode,
+confirmation, and live following behavior there. The slide browser scrolls inside the card by
 default, so other cards on a tablet dashboard remain in place. Adjust
 `browser_height` in pixels or set `internal_scroll: false` if you prefer the
 dashboard to grow normally.

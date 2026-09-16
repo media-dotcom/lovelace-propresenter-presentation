@@ -101,15 +101,20 @@ export class ProPresenterPresentationCard extends LitElement {
     }
 
     .media-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      display: grid;
       gap: 12px;
       margin: 0 0 12px;
       padding: 10px 12px;
       border: 1px solid color-mix(in srgb, var(--pp-accent) 25%, transparent);
       border-radius: 12px;
       background: color-mix(in srgb, var(--pp-accent) 10%, var(--pp-surface));
+    }
+
+    .media-header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
     }
 
     .media-heading {
@@ -145,12 +150,49 @@ export class ProPresenterPresentationCard extends LitElement {
     }
 
     .media-actions button {
-      min-width: 72px;
+      min-width: 40px;
     }
 
-    .media-actions button.active {
+    .media-icon-button {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      border-radius: 50%;
       color: var(--text-primary-color, white);
       background: var(--pp-accent);
+    }
+
+    .media-icon-button ha-icon {
+      --mdc-icon-size: 22px;
+    }
+
+    .media-progress {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .media-progress input {
+      width: 100%;
+      margin: 0;
+      accent-color: var(--pp-accent);
+      cursor: pointer;
+    }
+
+    .media-progress input:disabled {
+      cursor: wait;
+      opacity: 0.62;
+    }
+
+    .media-time {
+      min-width: 34px;
+      color: var(--pp-muted);
+      font-size: 0.7rem;
+      font-variant-numeric: tabular-nums;
+      text-align: center;
     }
 
     select {
@@ -348,6 +390,10 @@ export class ProPresenterPresentationCard extends LitElement {
   private _playlistPendingTimer?: number;
   private _mediaPendingCommand: "media_play" | "media_pause" | null = null;
   private _mediaCommandTimer?: number;
+  private _mediaPendingSeek = false;
+  private _mediaSeekTarget: number | null = null;
+  private _mediaSeekValue: number | null = null;
+  private _mediaSeekTimer?: number;
   private _error: CardError = null;
   private _statusMessage = "";
   private _lastStatePointer = "";
@@ -359,6 +405,7 @@ export class ProPresenterPresentationCard extends LitElement {
     this._hass = value;
     const newState = this._state();
     const newMediaState = this._mediaPlayerState();
+    this._reconcileMediaSeek(newMediaState);
     const playlistPointer = this._playlistPointer(newState);
     if (playlistPointer !== this._lastPlaylistStatePointer) {
       this._lastPlaylistStatePointer = playlistPointer;
@@ -428,6 +475,10 @@ export class ProPresenterPresentationCard extends LitElement {
     }
     this._clearMediaCommandTimer();
     this._mediaPendingCommand = null;
+    this._clearMediaSeekTimer();
+    this._mediaPendingSeek = false;
+    this._mediaSeekTarget = null;
+    this._mediaSeekValue = null;
     this._clearThumbnailUrls();
     this._error = null;
     this.requestUpdate();
@@ -537,6 +588,11 @@ export class ProPresenterPresentationCard extends LitElement {
       window.clearTimeout(this._playlistPendingTimer);
     }
     this._clearMediaCommandTimer();
+    this._mediaPendingCommand = null;
+    this._clearMediaSeekTimer();
+    this._mediaPendingSeek = false;
+    this._mediaSeekTarget = null;
+    this._mediaSeekValue = null;
     super.disconnectedCallback();
   }
 
@@ -622,35 +678,56 @@ export class ProPresenterPresentationCard extends LitElement {
     const transportState = mediaPlayerTransportState(mediaState);
     const attributes = mediaState?.attributes ?? {};
     const title = this._stringAttribute(attributes.media_title) ?? "Video";
-    const position = formatMediaTime(attributes.media_position);
-    const duration = formatMediaTime(attributes.media_duration);
-    const time = position && duration ? `${position} / ${duration}` : position ?? duration;
+    const position = this._numberAttribute(attributes.media_position);
+    const duration = this._numberAttribute(attributes.media_duration);
+    const progress = duration !== null && duration > 0
+      ? Math.min(duration, Math.max(0, this._mediaSeekValue ?? position ?? 0))
+      : null;
     const pending = this._mediaPendingCommand;
     const controlsEnabled = !this._config.read_only && !this._isEditorPreview();
+    const busy = Boolean(pending) || this._mediaPendingSeek;
     const status = pending
       ? pending === "media_play" ? "Sending play…" : "Sending pause…"
-      : transportState === "playing" ? "Playing" : "Paused";
+      : this._mediaPendingSeek
+        ? "Sending seek…"
+        : transportState === "playing" ? "Playing" : "Paused";
+    const toggleService = transportState === "playing" ? "media_pause" : "media_play";
+    const toggleLabel = transportState === "playing" ? "Pause video" : "Play video";
     return html`
       <section class="media-header" aria-label="ProPresenter video playback">
-        <div class="media-heading">
-          <p class="media-kicker">Video playback</p>
-          <strong class="media-title">${title}</strong>
-          <p class="media-meta">${status}${time ? ` · ${time}` : ""}</p>
+        <div class="media-header-top">
+          <div class="media-heading">
+            <p class="media-kicker">Video playback</p>
+            <strong class="media-title">${title}</strong>
+            <p class="media-meta">${status}</p>
+          </div>
+          ${controlsEnabled
+            ? html`<div class="media-actions">
+                <button
+                  class="media-icon-button"
+                  @click=${() => this._mediaPlayerCommand(toggleService)}
+                  ?disabled=${busy}
+                  aria-label=${toggleLabel}
+                  title=${toggleLabel}
+                ><ha-icon icon=${transportState === "playing" ? "mdi:pause" : "mdi:play"}></ha-icon></button>
+              </div>`
+            : nothing}
         </div>
-        ${controlsEnabled
-          ? html`<div class="media-actions">
-              <button
-                class=${transportState === "playing" ? "active" : ""}
-                @click=${() => this._mediaPlayerCommand("media_play")}
-                ?disabled=${Boolean(pending) || transportState === "playing"}
-                title="Play the ProPresenter video"
-              >▶ Play</button>
-              <button
-                class=${transportState === "paused" ? "active" : ""}
-                @click=${() => this._mediaPlayerCommand("media_pause")}
-                ?disabled=${Boolean(pending) || transportState !== "playing"}
-                title="Pause the ProPresenter video"
-              >⏸ Pause</button>
+        ${progress !== null
+          ? html`<div class="media-progress">
+              <span class="media-time">${formatMediaTime(progress)}</span>
+              <input
+                type="range"
+                min="0"
+                max=${duration}
+                step="1"
+                .value=${String(progress)}
+                @input=${this._handleMediaSeekInput}
+                @change=${this._handleMediaSeekChange}
+                ?disabled=${!controlsEnabled || busy}
+                aria-label="Video position"
+              />
+              <span class="media-time">${formatMediaTime(duration)}</span>
             </div>`
           : nothing}
       </section>
@@ -890,6 +967,7 @@ export class ProPresenterPresentationCard extends LitElement {
       this._config.read_only ||
       this._isEditorPreview() ||
       !this._hass ||
+      this._mediaPendingSeek ||
       !isVideoMediaPlayerActive(this._mediaPlayerState())
     ) {
       return;
@@ -917,6 +995,70 @@ export class ProPresenterPresentationCard extends LitElement {
       this._error = { message: `Video command failed: ${this._errorMessage(error)}` };
     } finally {
       this._mediaPendingCommand = null;
+      this.requestUpdate();
+    }
+  }
+
+  private _handleMediaSeekInput = (event: Event): void => {
+    const value = this._numberAttribute((event.target as HTMLInputElement).value);
+    if (value === null) return;
+    this._mediaSeekValue = value;
+    this.requestUpdate();
+  };
+
+  private _handleMediaSeekChange = (event: Event): void => {
+    const value = this._numberAttribute((event.target as HTMLInputElement).value);
+    if (value === null) return;
+    void this._seekMedia(value);
+  };
+
+  private async _seekMedia(position: number): Promise<void> {
+    const entityId = this._config.media_player_entity;
+    const mediaState = this._mediaPlayerState();
+    const duration = this._numberAttribute(mediaState?.attributes?.media_duration);
+    if (
+      !entityId ||
+      this._config.read_only ||
+      this._isEditorPreview() ||
+      !this._hass ||
+      this._mediaPendingSeek ||
+      !isVideoMediaPlayerActive(mediaState) ||
+      duration === null ||
+      duration <= 0
+    ) {
+      return;
+    }
+    const target = Math.min(duration, Math.max(0, position));
+    this._clearMediaSeekTimer();
+    this._mediaPendingSeek = true;
+    this._mediaSeekTarget = target;
+    this._mediaSeekValue = target;
+    this._error = null;
+    this._statusMessage = "Video seek command pending";
+    this.requestUpdate();
+    try {
+      await this._hass.callService(
+        "media_player",
+        "media_seek",
+        { entity_id: entityId, seek_position: target },
+      );
+      const message = "Video seek command sent";
+      this._statusMessage = message;
+      this._mediaSeekTimer = window.setTimeout(() => {
+        this._mediaSeekTarget = null;
+        this._mediaSeekValue = null;
+        this._statusMessage = "";
+        this._mediaSeekTimer = undefined;
+        this.requestUpdate();
+      }, 5000);
+    } catch (error) {
+      this._clearMediaSeekTimer();
+      this._mediaSeekTarget = null;
+      this._mediaSeekValue = null;
+      this._statusMessage = "";
+      this._error = { message: `Video seek failed: ${this._errorMessage(error)}` };
+    } finally {
+      this._mediaPendingSeek = false;
       this.requestUpdate();
     }
   }
@@ -1239,6 +1381,31 @@ export class ProPresenterPresentationCard extends LitElement {
     }
   }
 
+  private _clearMediaSeekTimer(): void {
+    if (this._mediaSeekTimer !== undefined) {
+      window.clearTimeout(this._mediaSeekTimer);
+      this._mediaSeekTimer = undefined;
+    }
+  }
+
+  private _reconcileMediaSeek(state: HassState | undefined): void {
+    if (this._mediaSeekTarget === null) return;
+    if (!isVideoMediaPlayerActive(state)) {
+      this._clearMediaSeekTimer();
+      this._mediaPendingSeek = false;
+      this._mediaSeekTarget = null;
+      this._mediaSeekValue = null;
+      return;
+    }
+    const position = this._numberAttribute(state?.attributes?.media_position);
+    if (position === null || Math.abs(position - this._mediaSeekTarget) > 1.5) return;
+    this._clearMediaSeekTimer();
+    this._mediaPendingSeek = false;
+    this._mediaSeekTarget = null;
+    this._mediaSeekValue = null;
+    if (this._statusMessage.startsWith("Video seek")) this._statusMessage = "";
+  }
+
   private _mediaPlayerState(): HassState | undefined {
     const entityId = this._config.media_player_entity;
     return entityId ? this._hass?.states?.[entityId] : undefined;
@@ -1255,6 +1422,12 @@ export class ProPresenterPresentationCard extends LitElement {
 
   private _stringAttribute(value: unknown): string | null {
     return typeof value === "string" && value ? value : null;
+  }
+
+  private _numberAttribute(value: unknown): number | null {
+    if (value === null || value === undefined || value === "") return null;
+    const number = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(number) ? number : null;
   }
 
   private _subtitle(attributes: Record<string, unknown>): string {
