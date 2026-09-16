@@ -5,6 +5,8 @@ import type {
   PresentationSlide,
 } from "./types";
 
+const GENERIC_HASS_ERROR = "Home Assistant could not complete the request";
+
 export const DEFAULT_CONFIG: Required<
   Omit<CardConfig, "type" | "entity" | "columns">
 > & { columns: number | "auto" } = {
@@ -78,4 +80,27 @@ export function guardedTriggerData(
     expected_presentation_uuid: presentationUuid,
     expected_metadata_revision: metadataRevision,
   };
+}
+
+export function formatHassError(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (!error || typeof error !== "object") return GENERIC_HASS_ERROR;
+
+  const record = error as Record<string, unknown>;
+  if (record.error && record.error !== error) {
+    const nested = formatHassError(record.error);
+    if (nested !== GENERIC_HASS_ERROR) return nested;
+  }
+
+  const message = [record.message, record.detail, record.reason].find(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  const code = [record.code, record.error_code].find(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  if (message && code && !message.toLowerCase().startsWith(code.toLowerCase())) {
+    return `${code}: ${message}`;
+  }
+  return message || code || GENERIC_HASS_ERROR;
 }

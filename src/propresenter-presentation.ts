@@ -4,6 +4,7 @@ import {
   DEFAULT_CONFIG,
   flattenSlides,
   guardedTriggerData,
+  formatHassError,
   metadataPointer,
   normalizeConfig,
   thumbnailPath,
@@ -999,9 +1000,7 @@ export class ProPresenterPresentationCard extends LitElement {
   }
 
   private _errorMessage(error: unknown): string {
-    if (error instanceof Error) return error.message;
-    if (typeof error === "string") return error;
-    return "Home Assistant could not complete the request";
+    return formatHassError(error);
   }
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   flattenSlides,
+  formatHassError,
   guardedTriggerData,
   metadataPointer,
   normalizeConfig,
@@ -69,5 +70,14 @@ describe("presentation card model", () => {
       expected_metadata_revision: "revision",
     });
     expect(() => guardedTriggerData("sensor.pp", 5, "uuid", null)).toThrow();
+  });
+
+  it("preserves structured Home Assistant WebSocket errors", () => {
+    expect(formatHassError({ code: "unknown_command", message: "Unknown command" })).toBe(
+      "unknown_command: Unknown command",
+    );
+    expect(formatHassError({ error: { code: "not_found", message: "Entity missing" } })).toBe(
+      "not_found: Entity missing",
+    );
   });
 });
