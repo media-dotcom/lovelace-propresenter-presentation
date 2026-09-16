@@ -266,6 +266,7 @@ export class ProPresenterPresentationCard extends LitElement {
   private _playlistPromise: Promise<void> | null = null;
   private _playlistRequestKey = "__initial__";
   private _playlistRequestSequence = 0;
+  private _lastPlaylistStatePointer = "__initial__";
   private _selectedPlaylistUuid: string | null = null;
   private _selectedItemKey: string | null = null;
   private _selectedPresentationUuid: string | null = null;
@@ -288,11 +289,14 @@ export class ProPresenterPresentationCard extends LitElement {
     this._hass = value;
     const newState = this._state();
     const playlistPointer = this._playlistPointer(newState);
-    if (
-      playlistPointer !== this._playlistRequestKey &&
-      !this._playlistPromise
-    ) {
-      void this._loadPlaylists(false);
+    if (playlistPointer !== this._lastPlaylistStatePointer) {
+      this._lastPlaylistStatePointer = playlistPointer;
+      if (
+        (playlistPointer !== this._playlistRequestKey || !this._playlists.length) &&
+        !this._playlistPromise
+      ) {
+        void this._loadPlaylists(false);
+      }
     }
     const pointer = metadataPointer(newState);
     if (pointer !== this._lastStatePointer) {
@@ -331,6 +335,7 @@ export class ProPresenterPresentationCard extends LitElement {
     this._playlistRequestSequence += 1;
     this._metadataRequestKey = "";
     this._playlistRequestKey = "__initial__";
+    this._lastPlaylistStatePointer = "__initial__";
     this._playlists = [];
     this._selectedPlaylistUuid = null;
     this._selectedItemKey = null;
@@ -782,6 +787,17 @@ export class ProPresenterPresentationCard extends LitElement {
     const value = (event.target as HTMLSelectElement).value;
     this._selectedPlaylistUuid = value || null;
     this._selectedItemKey = null;
+    if (this._selectedPresentationUuid) {
+      this._selectedPresentationUuid = null;
+      this._metadataRequestSequence += 1;
+      this._metadata = null;
+      this._metadataRequestKey = "";
+      this._clearThumbnailUrls();
+      this._followingLive = true;
+      void this._loadMetadata(false);
+    }
+    this._error = null;
+    this._statusMessage = "";
     this.requestUpdate();
   };
 
@@ -832,11 +848,16 @@ export class ProPresenterPresentationCard extends LitElement {
           refresh,
         });
         if (sequence !== this._playlistRequestSequence) return;
-        if (result.protocol_version !== 1) {
+        if (!result || result.protocol_version !== 1) {
           this._error = { message: "The integration and card protocol versions do not match" };
           return;
         }
-        this._playlists = Array.isArray(result.playlists) ? result.playlists : [];
+        this._playlists = Array.isArray(result.playlists)
+          ? result.playlists.filter(
+              (playlist) =>
+                Boolean(playlist?.uuid) && Array.isArray(playlist.items),
+            )
+          : [];
         this._playlistRequestKey = result.playlist_revision ?? pointer;
         if (
           this._selectedPresentationUuid &&

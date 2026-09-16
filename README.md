@@ -12,7 +12,7 @@ asset `dist/propresenter-presentation.js` as a Dashboard plugin. Add the card
 resource at `/hacsfiles/lovelace-propresenter-presentation/propresenter-presentation.js`
 if HACS does not add it automatically.
 
-The integration must be installed at version `0.6.0` or later. Choose the
+The integration must be installed at version `0.6.1` or later. Choose the
 `Active presentation` sensor in the visual editor and configure the grid,
 thumbnail quality, labels, notes, read-only mode, confirmation, and live
 following behavior there. The slide browser scrolls inside the card by
