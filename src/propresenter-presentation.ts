@@ -30,6 +30,7 @@ interface SignPathResponse {
 }
 
 type CardError = { message: string; stale?: boolean } | null;
+type MediaTransportState = "playing" | "paused";
 
 export class ProPresenterPresentationCard extends LitElement {
   static styles = css`
@@ -394,6 +395,8 @@ export class ProPresenterPresentationCard extends LitElement {
   private _mediaSeekTarget: number | null = null;
   private _mediaSeekValue: number | null = null;
   private _mediaSeekTimer?: number;
+  private _mediaTransportOverride: MediaTransportState | null = null;
+  private _mediaSnapshot: HassState | null = null;
   private _error: CardError = null;
   private _statusMessage = "";
   private _lastStatePointer = "";
@@ -405,7 +408,8 @@ export class ProPresenterPresentationCard extends LitElement {
     this._hass = value;
     const newState = this._state();
     const newMediaState = this._mediaPlayerState();
-    this._reconcileMediaSeek(newMediaState);
+    this._reconcileMediaTransport(newMediaState);
+    this._reconcileMediaSeek(this._mediaViewState());
     const playlistPointer = this._playlistPointer(newState);
     if (playlistPointer !== this._lastPlaylistStatePointer) {
       this._lastPlaylistStatePointer = playlistPointer;
@@ -479,6 +483,8 @@ export class ProPresenterPresentationCard extends LitElement {
     this._mediaPendingSeek = false;
     this._mediaSeekTarget = null;
     this._mediaSeekValue = null;
+    this._mediaTransportOverride = null;
+    this._mediaSnapshot = null;
     this._clearThumbnailUrls();
     this._error = null;
     this.requestUpdate();
@@ -593,6 +599,8 @@ export class ProPresenterPresentationCard extends LitElement {
     this._mediaPendingSeek = false;
     this._mediaSeekTarget = null;
     this._mediaSeekValue = null;
+    this._mediaTransportOverride = null;
+    this._mediaSnapshot = null;
     super.disconnectedCallback();
   }
 
@@ -673,7 +681,7 @@ export class ProPresenterPresentationCard extends LitElement {
   }
 
   private _renderMediaHeader() {
-    const mediaState = this._mediaPlayerState();
+    const mediaState = this._mediaViewState();
     if (!isVideoMediaPlayerActive(mediaState)) return nothing;
     const transportState = mediaPlayerTransportState(mediaState);
     const attributes = mediaState?.attributes ?? {};
@@ -968,7 +976,7 @@ export class ProPresenterPresentationCard extends LitElement {
       this._isEditorPreview() ||
       !this._hass ||
       this._mediaPendingSeek ||
-      !isVideoMediaPlayerActive(this._mediaPlayerState())
+      !isVideoMediaPlayerActive(this._mediaViewState())
     ) {
       return;
     }
@@ -981,6 +989,8 @@ export class ProPresenterPresentationCard extends LitElement {
     this.requestUpdate();
     try {
       await this._hass.callService("media_player", service, { entity_id: entityId });
+      this._mediaTransportOverride = service === "media_play" ? "playing" : "paused";
+      this._captureMediaSnapshot(this._mediaPlayerState());
       const message = service === "media_play" ? "Video play command sent" : "Video pause command sent";
       this._statusMessage = message;
       this._mediaCommandTimer = window.setTimeout(() => {
@@ -1014,7 +1024,7 @@ export class ProPresenterPresentationCard extends LitElement {
 
   private async _seekMedia(position: number): Promise<void> {
     const entityId = this._config.media_player_entity;
-    const mediaState = this._mediaPlayerState();
+    const mediaState = this._mediaViewState();
     const duration = this._numberAttribute(mediaState?.attributes?.media_duration);
     if (
       !entityId ||
@@ -1386,6 +1396,56 @@ export class ProPresenterPresentationCard extends LitElement {
       window.clearTimeout(this._mediaSeekTimer);
       this._mediaSeekTimer = undefined;
     }
+  }
+
+  private _reconcileMediaTransport(state: HassState | undefined): void {
+    const contentType = this._stringAttribute(state?.attributes?.media_content_type);
+    if (contentType?.toLowerCase() === "image") {
+      this._mediaTransportOverride = null;
+      this._mediaSnapshot = null;
+      return;
+    }
+    const currentTitle = this._stringAttribute(state?.attributes?.media_title);
+    const snapshotTitle = this._stringAttribute(this._mediaSnapshot?.attributes?.media_title);
+    if (
+      this._mediaTransportOverride &&
+      currentTitle &&
+      snapshotTitle &&
+      currentTitle !== snapshotTitle
+    ) {
+      this._mediaTransportOverride = null;
+    }
+    if (isVideoMediaPlayerActive(state)) {
+      this._captureMediaSnapshot(state);
+      if (mediaPlayerTransportState(state) === this._mediaTransportOverride) {
+        this._mediaTransportOverride = null;
+      }
+    } else if (!this._mediaTransportOverride) {
+      this._mediaSnapshot = null;
+    }
+  }
+
+  private _captureMediaSnapshot(state: HassState | undefined): void {
+    if (!state || !isVideoMediaPlayerActive(state)) return;
+    this._mediaSnapshot = {
+      state: state.state,
+      attributes: { ...(state.attributes ?? {}) },
+    };
+  }
+
+  private _mediaViewState(): HassState | undefined {
+    const current = this._mediaPlayerState();
+    if (!this._mediaTransportOverride) return current;
+    const source = isVideoMediaPlayerActive(current) ? current : this._mediaSnapshot;
+    if (!source) return current;
+    return {
+      state: this._mediaTransportOverride,
+      attributes: {
+        ...(this._mediaSnapshot?.attributes ?? {}),
+        ...(current?.attributes ?? {}),
+        media_content_type: "video",
+      },
+    };
   }
 
   private _reconcileMediaSeek(state: HassState | undefined): void {
