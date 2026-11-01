@@ -770,7 +770,7 @@ export class ProPresenterPresentationCard extends LitElement {
     const state = this._state();
     const requestedUuid = this._selectedPresentationUuid;
     const pointer = requestedUuid ? `selected|${requestedUuid}` : metadataPointer(state);
-    if (pointer === this._metadataRequestKey && this._metadataPromise) {
+    if (!refresh && pointer === this._metadataRequestKey && this._metadataPromise) {
       return this._metadataPromise;
     }
     if (!refresh && pointer === this._metadataRequestKey) return;
@@ -799,6 +799,7 @@ export class ProPresenterPresentationCard extends LitElement {
         this.requestUpdate();
       } catch (error) {
         if (sequence !== this._metadataRequestSequence) return;
+        this._metadataRequestKey = "";
         this._error = { message: this._errorMessage(error) };
         this.requestUpdate();
       }
@@ -1269,7 +1270,7 @@ export class ProPresenterPresentationCard extends LitElement {
 
   private async _loadPlaylists(refresh: boolean): Promise<void> {
     if (!this._hass || !this._config.entity) return;
-    if (this._playlistPromise) return this._playlistPromise;
+    if (!refresh && this._playlistPromise) return this._playlistPromise;
     const pointer = this._playlistPointer(this._state());
     if (!refresh && this._playlists.length && pointer === this._playlistRequestKey) return;
     const sequence = ++this._playlistRequestSequence;
