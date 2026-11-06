@@ -743,9 +743,10 @@ export class ProPresenterPresentationCard extends LitElement {
   }
 
   private _renderSlide(slide: PresentationSlide) {
-    const active = !this._selectedPresentationUuid && this._currentIndex(this._state()) === slide.index;
+    const liveUuid = this._stringAttribute(this._state()?.attributes?.presentation_uuid);
+    const active = (!this._selectedPresentationUuid || this._selectedPresentationUuid === liveUuid) && this._currentIndex(this._state()) === slide.index;
     const disabled = slide.enabled === false;
-    const triggerable = !this._selectedPresentationUuid && !this._config.read_only && !disabled && !this._isEditorPreview();
+    const triggerable = !this._config.read_only && !disabled && !this._isEditorPreview();
     const classes = `tile ${active ? "active" : ""} ${disabled ? "disabled" : ""}`;
     const content = html`
       <div class="thumbnail" data-slide-index=${slide.index}>
