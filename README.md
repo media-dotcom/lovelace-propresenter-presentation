@@ -1,5 +1,12 @@
 # ProPresenter Presentation Card
 
+> **Repository consolidation planned:** this card's source and release asset
+> are being brought together with the ProPresenter Home Assistant integration
+> in [`media-dotcom/ha-propresenter-suite`](https://github.com/media-dotcom/ha-propresenter-suite).
+> Keep using this repository's current release until the consolidated release
+> and migration instructions are verified. This repository will then point
+> users to the bundled card.
+
 `custom:propresenter-presentation` is the companion dashboard card for the
 Home Assistant [ProPresenter integration](https://github.com/media-dotcom/ha-propresenter-reliable-browser).
 It renders the changing slide collection as one responsive grid instead of
