@@ -1,11 +1,10 @@
 # ProPresenter Presentation Card
 
-> **Repository consolidation planned:** this card's source and release asset
-> are being brought together with the ProPresenter Home Assistant integration
-> in [`media-dotcom/ha-propresenter-suite`](https://github.com/media-dotcom/ha-propresenter-suite).
-> Keep using this repository's current release until the consolidated release
-> and migration instructions are verified. This repository will then point
-> users to the bundled card.
+> **Consolidated:** The integration and dashboard card have been merged into
+> [media-dotcom/ha-propresenter](https://github.com/media-dotcom/ha-propresenter).
+> That repository is the single home for the combined solution. Follow its
+> installation and migration instructions; live validation and a consolidated
+> release are still pending.
 
 `custom:propresenter-presentation` is the companion dashboard card for the
 Home Assistant [ProPresenter integration](https://github.com/media-dotcom/ha-propresenter-reliable-browser).
